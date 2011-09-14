@@ -13,11 +13,26 @@ using System.Threading.Tasks;
 using CoApp.Toolkit.Engine;
 using CoApp.Toolkit.Extensions;
 using CoApp.Toolkit.Engine.Client;
-using CoApp.Toolkit.Console;
 
 namespace CoApp.PSClient
 {
-    
+    [RunInstaller(true)]
+    public class PSClient_Snapin : PSSnapIn
+    {
+        public override string Name
+        { get { return "CoApp"; } }
+
+        public override string Description
+        { get { return "PowerShell cmdlets for CoApp."; } }
+
+        public override string Vendor
+        { get { return "CoApp.org"; } }
+
+        public override string[] Formats
+        {
+            get { return new string[] { "CoApp.format.ps1xml" }; }
+        }
+    }
 
     internal class Feed
     {
@@ -30,13 +45,52 @@ namespace CoApp.PSClient
 
     public class CoApp_Cmdlet : PSCmdlet
     {
-
         [Parameter(Mandatory = false, ValueFromPipeline = false)]
         public string SessionID = null;
         
         protected PackageManager PM;
         protected PackageManagerMessages messages;
-        internal static char[] ChoiceSelections = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'};
+
+        internal static Toolkit.Collections.EasyDictionary<int, string> Selections = new Toolkit.Collections.EasyDictionary<int,string>
+            {
+                {0, "&0 - "},
+                {1, "&1 - "},
+                {2, "&2 - "},
+                {3, "&3 - "},
+                {4, "&4 - "},
+                {5, "&5 - "},
+                {6, "&6 - "},
+                {7, "&7 - "},
+                {8, "&8 - "},
+                {9, "&9 - "},
+                {10, "&a - "},
+                {11, "&b - "},
+                {12, "&c - "},
+                {13, "&d - "},
+                {14, "&e - "},
+                {15, "&f - "},
+                {16, "&g - "},
+                {17, "&h - "},
+                {18, "&i - "},
+                {19, "&j - "},
+                {20, "&k - "},
+                {21, "&l - "},
+                {22, "&m - "},
+                {23, "&n - "},
+                {24, "&o - "},
+                {25, "&p - "},
+                {26, "&q - "},
+                {27, "&r - "},
+                {28, "&s - "},
+                {29, "&t - "},
+                {30, "&u - "},
+                {31, "&v - "},
+                {32, "&w - "},
+                {33, "&x - "},
+                {34, "&y - "},
+                {35, "&z - "},
+            };
+        //internal static char[] ChoiceSelections = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'};
         protected List<Object> output;
         protected Task task;
             
@@ -202,6 +256,10 @@ namespace CoApp.PSClient
                 task.Wait();
             // wait for cancellation token, or service to disconnect
             WaitHandle.WaitAny(new[] {PM.IsDisconnected, PM.IsCompleted});
+            
+            
+
+
             foreach (var item in output)
             {
                 WriteObject(item);
@@ -214,13 +272,13 @@ namespace CoApp.PSClient
     [Cmdlet("List", "Package", DefaultParameterSetName = "Typed")]
     public class ListPackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = false, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = false, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = false, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = false, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
-        
-        [Parameter(Mandatory = false, ParameterSetName = "Typed")]
+
+        [Parameter(Mandatory = false, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -279,7 +337,7 @@ namespace CoApp.PSClient
                                                               }, TaskContinuationOptions.AttachedToParent);
                     break;
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(
                         search,
                         MinVersion.VersionStringToUInt64(),
@@ -289,8 +347,11 @@ namespace CoApp.PSClient
                         ForceScan,
                         messages).ContinueWith((FP) =>
                                                    {
-                                                       foreach (Package P in FP.Result)
-                                                           output.Add(P);
+                                                       if (FP.Result.Any())
+                                                           foreach (Package P in FP.Result)
+                                                               output.Add(P);
+                                                       else
+                                                           Host.UI.WriteLine(ConsoleColor.Red,Host.UI.RawUI.BackgroundColor,"Empty list returned from GetPackages().");
                                                    }, TaskContinuationOptions.AttachedToParent);
                     break;
                 default:
@@ -306,13 +367,13 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsCommon.Get, "PackageInfo", DefaultParameterSetName = "Typed")]
     public class GetPackageInfo : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -369,7 +430,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), 
                                    Dependencies,Installed, Active, Required, Blocked, Latest, Location, ForceScan,
                                    messages).ContinueWith((FP) =>
@@ -383,8 +444,7 @@ namespace CoApp.PSClient
                                            foreach (Package p in PL)
                                            {
                                                string desc = "";
-                                               if (i < ChoiceSelections.Length)
-                                                   desc += "&" + ChoiceSelections[i++] + " - ";
+                                               desc += Selections[i++];
                                                desc += p.Name + "-" + p.Version + "-" + p.Architecture;
                                                Choices.Add(new ChoiceDescription(desc,p.CanonicalName));
                                            }
@@ -417,13 +477,13 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsLifecycle.Install, "Package", DefaultParameterSetName = "Typed")]
     public class InstallPackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
-        
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -602,7 +662,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -610,12 +670,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -643,13 +707,13 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsCommon.Remove, "Package", DefaultParameterSetName = "Typed")]
     public class RemovePackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -705,7 +769,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -713,12 +777,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -746,13 +814,13 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsData.Update, "Package", DefaultParameterSetName = "Typed")]
     public class UpdatePackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -867,13 +935,13 @@ namespace CoApp.PSClient
     [Cmdlet("Activate", "Package", DefaultParameterSetName = "Typed")]
     public class ActivatePackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -919,7 +987,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -927,12 +995,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -960,13 +1032,13 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsSecurity.Block, "Package", DefaultParameterSetName = "Typed")]
     public class BlockPackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -1011,7 +1083,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -1019,12 +1091,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -1052,13 +1128,13 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsSecurity.Unblock, "Package", DefaultParameterSetName = "Typed")]
     public class UnblockPackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -1103,7 +1179,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -1111,12 +1187,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -1144,13 +1224,13 @@ namespace CoApp.PSClient
     [Cmdlet("Mark", "Package", DefaultParameterSetName = "Typed")]
     public class MarkPackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -1195,7 +1275,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -1203,12 +1283,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -1236,13 +1320,13 @@ namespace CoApp.PSClient
     [Cmdlet("Unmark", "Package", DefaultParameterSetName = "Typed")]
     public class UnmarkPackage : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Package")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Package")]
         public Package InputPackage;
 
-        [Parameter(Mandatory = true, ValueFromPipeline = true, ParameterSetName = "Canonical")]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true, ParameterSetName = "Canonical")]
         public string CanonicalName;
 
-        [Parameter(Mandatory = true, ParameterSetName = "Typed")]
+        [Parameter(Mandatory = true, Position = 0, ParameterSetName = "Typed")]
         public string Name;
         [Parameter(Mandatory = false, ParameterSetName = "Typed")]
         public string Version;
@@ -1287,7 +1371,7 @@ namespace CoApp.PSClient
                     break;
 
                 case "Typed":
-                    string search = Name + "-" + Version + "-" + Arch + "-" + PublicKeyToken;
+                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
                     task = PM.GetPackages(search,
                                    MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
                                    Installed, Active, Required, Blocked, Latest, Location, ForceScan,
@@ -1295,12 +1379,16 @@ namespace CoApp.PSClient
                                    {
                                        String P;
                                        IEnumerable<Package> PL = FP.Result;
+                                       int i = 0;
                                        if (PL.Count() > 1)
                                        {
                                            Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
                                            foreach (Package p in PL)
                                            {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
+                                               string desc = "";
+                                               desc += Selections[i++];
+                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
                                            }
                                            int choice = Host.UI.PromptForChoice("Multiple possible matches.",
                                                                    "Please choose one of the following:", Choices, 0);
@@ -1348,7 +1436,7 @@ namespace CoApp.PSClient
     [Cmdlet(VerbsCommon.Remove, "Feed")]
     public class RemoveFeed : CoApp_Cmdlet
     {
-        [Parameter(Mandatory = true)]
+        [Parameter(Mandatory = true, Position = 0)]
         public string Location;
         [Parameter(Mandatory = false)]
         public SwitchParameter SessionOnly;
