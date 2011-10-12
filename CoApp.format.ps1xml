@@ -8,22 +8,19 @@
         <TypeName>CoApp.Toolkit.Engine.Client.Package</TypeName>
       </ViewSelectedBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader>
             <Label>Name</Label>
-            <Width>25</Width>
           </TableColumnHeader>
           <TableColumnHeader>
             <Label>Version</Label>
-            <Width>12</Width>
           </TableColumnHeader>
           <TableColumnHeader>
             <Label>Arch</Label>
-            <Width>6</Width>
           </TableColumnHeader>
           <TableColumnHeader>
-            <Label>Installed</Label>
-            <Width>10</Width>
+            <Label>Flags</Label>
           </TableColumnHeader>
           <TableColumnHeader>
             <Label>Location</Label>
@@ -47,7 +44,7 @@
                 <Alignment>Center</Alignment>
               </TableColumnItem>
               <TableColumnItem>
-                <PropertyName>IsInstalled</PropertyName>
+                <ScriptBlock>$FL="";if ($_.IsConflicted){$FL+="!"}else{$FL+=" "};if ($_.IsActive){$FL+="A"}else{$FL+=" "};if ($_.IsInstalled){$FL+="I"}else{$FL+=" "};if ($_.IsClientRequired){$FL+="M"}else{if ($_.Required){$FL+="R"}else{$FL+=" "}};if ($_.IsDependency){$FL+="D"}else{$FL+=" "};if ($_.IsBlocked){$FL+="B"}else{$FL+=" "};$FL;</ScriptBlock>
                 <Alignment>Right</Alignment>
               </TableColumnItem>
               <TableColumnItem>

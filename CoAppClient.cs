@@ -1,4 +1,15 @@
-﻿using System;
+﻿//-----------------------------------------------------------------------
+// <copyright company="CoApp Project">
+//     Copyright (c) 2011 Timothy Rogers. All rights reserved.
+// </copyright>
+// <license>
+//     The software is licensed under the Apache 2.0 License (the "License")
+//     You may not use the software except in compliance with the License. 
+// </license>
+//-----------------------------------------------------------------------
+
+
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -10,12 +21,32 @@ using System.Net;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using CoApp.PSClient.Remoting;
 using CoApp.Toolkit.Engine;
 using CoApp.Toolkit.Extensions;
 using CoApp.Toolkit.Engine.Client;
 
 namespace CoApp.PSClient
 {
+    #region SnapIn (Old)
+    /* Old section.  Used when this was a snapin instead of a module.
+     * 
+     * Powershell SnapIn client for CoApp
+     * 
+     * Note:  To register the snapin with the system (and therefore use a single 
+     *        command to load the cmdlets), enter the following at the powershell 
+     *        prompt from the library directory.
+     * 
+     *    Invoke-Expression ((Get-ChildItem -Recurse -Path "${env:systemroot}\Microsoft.NET" -include installutil.exe)[-1].ToString() + " .\CoApp.dll")
+     *    
+     *        After doing this once, the cmdlets may be loaded in the future by
+     *        entering the following (not case-sensitive).
+     *        
+     *    Add-PSSnapin CoApp
+     *    
+     *        Also, be aware that these cmdlets require Powershell to use the .NET 4 runtimes, which is not loaded by default in Powershell 2.0.
+     */ 
+     /*
     [RunInstaller(true)]
     public class PSClient_Snapin : PSSnapIn
     {
@@ -33,6 +64,8 @@ namespace CoApp.PSClient
             get { return new string[] { "CoApp.format.ps1xml" }; }
         }
     }
+    */
+    #endregion
 
     internal class Feed
     {
@@ -47,10 +80,25 @@ namespace CoApp.PSClient
     {
         [Parameter(Mandatory = false, ValueFromPipeline = false)]
         public string SessionID = null;
+
+        // remoting parameters
+        [Parameter(Mandatory = false, ValueFromPipeline = false)]
+        public string[] ComputerName = null;
+        [Parameter(Mandatory = false, ValueFromPipeline = false)]
+        public PSCredential Credential = null;
+        [Parameter(Mandatory = false, ValueFromPipeline = false)]
+        public SwitchParameter UseSSL = false;
+        [Parameter(Mandatory = false, ValueFromPipeline = false)]
+        public int? Port = null;
+        [Parameter(Mandatory = false, ValueFromPipeline = false)]
+        public int? Timeout = null;
+
+        protected List<Runspace> Remotes;
         
         protected PackageManager PM;
         protected PackageManagerMessages messages;
 
+        // Internal dictionary.  Is only used for selection prompts.
         internal static Toolkit.Collections.EasyDictionary<int, string> Selections = new Toolkit.Collections.EasyDictionary<int,string>
             {
                 {0, "&0 - "},
@@ -90,55 +138,73 @@ namespace CoApp.PSClient
                 {34, "&y - "},
                 {35, "&z - "},
             };
-        //internal static char[] ChoiceSelections = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'};
         protected List<Object> output;
         protected Task task;
+        protected Cmdlet BackRef;
             
         protected override void BeginProcessing()
         {
+            BackRef = this;
             output = new List<object>();
-            PM = PackageManager.Instance;
-            PM.Connect("PSClient", SessionID);
-            messages = new PackageManagerMessages
+
+            // Remoting...
+            if (!ComputerName.IsNullOrEmpty())
             {
-                UnexpectedFailure = UnexpectedFailure,
-                NoPackagesFound = NoPackagesFound,
-                PermissionRequired = OperationRequiresPermission,
-                Error = MessageArgumentError,
-                RequireRemoteFile = GetRemoteFile,
-                OperationCancelled = CancellationRequested,
-                PackageInformation = PackageInfo,
-                PackageDetails = PackageDetail,
-                FeedDetails = FeedInfo,
-                ScanningPackagesProgress = ScanProgress,
-                InstallingPackageProgress = InstallProgress,
-                RemovingPackageProgress = RemoveProgress,
-                InstalledPackage = InstallComplete,
-                RemovedPackage = RemoveComplete,
-                FailedPackageInstall = InstallFailed,
-                FailedPackageRemoval = RemoveFailed,
-                Warning = WarningMsg,
-                FeedAdded = NewFeed,
-                FeedRemoved = LostFeed,
-                FeedSuppressed = SupressedFeed,
-                NoFeedsFound = NoFeeds,
-                FileNotFound = NoFile,
-                PackageBlocked = BlockedPackage,
-                FileNotRecognized = NotRecognized,
-                Recognized = Recognized,
-                UnknownPackage = Unknown,
-                PackageHasPotentialUpgrades = PotentialUpgrades,
-                UnableToDownloadPackage = UnableToDownload,
-                UnableToInstallPackage = UnableToInstall,
-                UnableToResolveDependencies = UnableToResolveDeps,
-                PackageSatisfiedBy = Satisfied
-            }; 
+                Remotes = new List<Runspace>();
+                Remote.ConnectionGenerator Gen = new Remote.ConnectionGenerator(UseSSL, Credential, Port);
+                foreach (string comp in ComputerName)
+                {
+                    Remotes.Add(Gen.Generate(comp, Timeout, true));
+                }
+            }
+            // Not remoting...
+            else
+            {
+                PM = PackageManager.Instance;
+                PM.Connect("PSClient", SessionID);
+                messages = new PackageManagerMessages
+                               {
+                                   UnexpectedFailure = UnexpectedFailure,
+                                   NoPackagesFound = NoPackagesFound,
+                                   PermissionRequired = OperationRequiresPermission,
+                                   Error = MessageArgumentError,
+                                   RequireRemoteFile = GetRemoteFile,
+                                   OperationCancelled = CancellationRequested,
+                                   PackageInformation = PackageInfo,
+                                   PackageDetails = PackageDetail,
+                                   FeedDetails = FeedInfo,
+                                   ScanningPackagesProgress = ScanProgress,
+                                   InstallingPackageProgress = InstallProgress,
+                                   RemovingPackageProgress = RemoveProgress,
+                                   InstalledPackage = InstallComplete,
+                                   RemovedPackage = RemoveComplete,
+                                   FailedPackageInstall = InstallFailed,
+                                   FailedPackageRemoval = RemoveFailed,
+                                   Warning = WarningMsg,
+                                   FeedAdded = NewFeed,
+                                   FeedRemoved = LostFeed,
+                                   FeedSuppressed = SupressedFeed,
+                                   NoFeedsFound = NoFeeds,
+                                   FileNotFound = NoFile,
+                                   PackageBlocked = BlockedPackage,
+                                   FileNotRecognized = NotRecognized,
+                                   Recognized = Recognized,
+                                   UnknownPackage = Unknown,
+                                   PackageHasPotentialUpgrades = PotentialUpgrades,
+                                   UnableToDownloadPackage = UnableToDownload,
+                                   UnableToInstallPackage = UnableToInstall,
+                                   UnableToResolveDependencies = UnableToResolveDeps,
+                                   PackageSatisfiedBy = Satisfied
+                               };
+            }
+            
         }
 
         protected override void EndProcessing()
         {
             WaitForComplete();
-            PM.Disconnect();
+            if (ComputerName.IsNullOrEmpty())
+                PM.Disconnect();
         }
 
         #region Default message handlers
@@ -150,8 +216,8 @@ namespace CoApp.PSClient
             { Host.UI.WriteLine("FeedInfo received: " + Location); }
         protected void ScanProgress(string Location, int Progress)
             { Host.UI.WriteLine("Scanning in progress:  " + Location + "  " + Progress + "%"); }
-        protected void InstallProgress(string CName, int Progress)
-            { Host.UI.WriteLine("Install in progress:  " + CName + "  " + Progress + "%"); }
+        protected void InstallProgress(string CName, int Progress, int TotalProgress)
+        { Host.UI.WriteLine("Install in progress:  " + CName + "  " + Progress + "%" + "  Total: " + TotalProgress + "%"); }
         protected void RemoveProgress(string CName, int Progress)
             { Host.UI.WriteLine("Remove in progress:  " + CName + "  " + Progress + "%"); }
         protected void InstallComplete(string CName)
@@ -252,10 +318,18 @@ namespace CoApp.PSClient
 
         private void WaitForComplete()
         {
-            if (task != null && !(task.IsCompleted || task.IsCanceled || task.IsFaulted))
-                task.Wait();
+            if (task != null && !(task.IsCompleted || task.IsCanceled))
+                try
+                {
+                    task.Wait();
+                }
+                catch(Exception e)
+                {
+                    Host.UI.WriteLine(ConsoleColor.Red, Host.UI.RawUI.BackgroundColor, "Task faulted.");
+                }
             // wait for cancellation token, or service to disconnect
-            WaitHandle.WaitAny(new[] {PM.IsDisconnected, PM.IsCompleted});
+            if (ComputerName.IsNullOrEmpty())
+                WaitHandle.WaitAny(new[] {PM.IsDisconnected, PM.IsCompleted});
             
             
 
@@ -313,53 +387,97 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-
-            switch (ParameterSetName)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    task = PM.GetPackages(InputPackage.CanonicalName, null, null, null, null, null, null,
-                                   null, null, null, null, messages).ContinueWith( (FP) =>
-                                           {
-                                               foreach (Package P in FP.Result)
-                                                   output.Add(P);
-                                           }, TaskContinuationOptions.AttachedToParent);
-                    break;
-                case "Canonical":
-                    task = PM.GetPackages(CanonicalName, MinVersion.VersionStringToUInt64(),
-                                   MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed,
-                                   Active, Required, Blocked, Latest, Location,
-                                   ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                                              {
-                                                                  foreach (Package P in FP.Result)
-                                                                      output.Add(P);
-                                                              }, TaskContinuationOptions.AttachedToParent);
-                    break;
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(
-                        search,
-                        MinVersion.VersionStringToUInt64(),
-                        MaxVersion.VersionStringToUInt64(),
-                        Dependencies,
-                        Installed, Active, Required, Blocked, Latest, Location,
-                        ForceScan,
-                        messages).ContinueWith((FP) =>
-                                                   {
-                                                       if (FP.Result.Any())
-                                                           foreach (Package P in FP.Result)
-                                                               output.Add(P);
-                                                       else
-                                                           Host.UI.WriteLine(ConsoleColor.Red,Host.UI.RawUI.BackgroundColor,"Empty list returned from GetPackages().");
-                                                   }, TaskContinuationOptions.AttachedToParent);
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("List-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Installed != null) com.Parameters.Add("Installed", Installed);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                                    {
+                                        foreach (Runspace R in Remotes)
+                                        {
+                                            Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() => 
+                                                Remote.Exec(R, com));
+                                            T.ContinueWith(antecedent => 
+                                                    output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                                            T.Start();
+                                        }
+                                    });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        task = PM.GetPackages(InputPackage.CanonicalName, null, null, null, null, null, null,
+                                              null, null, null, null, messages).ContinueWith(FP =>
+                                                                                                 {
+                                                                                                     foreach (
+                                                                                                         Package P in
+                                                                                                             FP.Result)
+                                                                                                         output.Add(P);
+                                                                                                 },
+                                                                                             TaskContinuationOptions.
+                                                                                                 AttachedToParent);
+                        break;
+                    case "Canonical":
+                        task = PM.GetPackages(CanonicalName, MinVersion.VersionStringToUInt64(),
+                                              MaxVersion.VersionStringToUInt64(), Dependencies,
+                                              Installed,
+                                              Active, Required, Blocked, Latest, Location,
+                                              ForceScan,
+                                              messages).ContinueWith((FP) =>
+                                                                         {
+                                                                             foreach (Package P in FP.Result)
+                                                                                 output.Add(P);
+                                                                         }, TaskContinuationOptions.AttachedToParent);
+                        break;
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") +
+                                        (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(
+                            search,
+                            MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?) null,
+                            MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?) null,
+                            Dependencies,
+                            Installed, Active, Required, Blocked, Latest, Location,
+                            ForceScan,
+                            messages).ContinueWith((FP) =>
+                                                       {
+                                                           if (FP.Result.Any())
+                                                               foreach (Package P in FP.Result)
+                                                                   output.Add(P);
+                                                           else
+                                                               Host.UI.WriteLine(ConsoleColor.Red,
+                                                                                 Host.UI.RawUI.BackgroundColor,
+                                                                                 "Empty list returned from GetPackages().");
+                                                       }, TaskContinuationOptions.AttachedToParent);
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
 
+                }
+            }
         }
 
     }
@@ -408,69 +526,126 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            Package Details = null;
-            PackageManagerMessages DetailMessages = new PackageManagerMessages()
-                                                         {
-                                                             PackageDetails = (P) =>
-                                                                                  {
-                                                                                      Details = P;
-                                                                                  }
-                                                         }.Extend(messages);
-            switch (ParameterSetName)
+                        // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.GetPackageDetails(InputPackage.CanonicalName, DetailMessages).ContinueWith((FP) =>
-                                                                                      {
-                                                                                          if (Details != null)
-                                                                                              output.Add(Details);
-                                                                                      }, TaskContinuationOptions.AttachedToParent);
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), 
-                                   Dependencies,Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc,p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].HelpMessage;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.GetPackageDetails(P, DetailMessages).ContinueWith((FDP) =>
-                                       {
-                                           if (Details != null)
-                                               output.Add(Details);
-                                       }, TaskContinuationOptions.AttachedToParent);
-                                   });
-                    
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Get-PackageInfo");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Installed != null) com.Parameters.Add("Installed", Installed);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                                    {
+                                        foreach (Runspace R in Remotes)
+                                        {
+                                            Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                                                Remote.Exec(R, com));
+                                            T.ContinueWith(antecedent =>
+                                                    output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                                            T.Start();
+                                        }
+                                    });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
 
+                Package Details = null;
+                PackageManagerMessages DetailMessages = new PackageManagerMessages()
+                                                            {
+                                                                PackageDetails = (P) =>
+                                                                                     {
+                                                                                         Details = P;
+                                                                                     }
+                                                            }.Extend(messages);
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.GetPackageDetails(InputPackage.CanonicalName, DetailMessages).ContinueWith((FP) =>
+                                                                                                                 {
+                                                                                                                     if
+                                                                                                                         (
+                                                                                                                         Details !=
+                                                                                                                         null)
+                                                                                                                         output
+                                                                                                                             .
+                                                                                                                             Add
+                                                                                                                             (Details);
+                                                                                                                 },
+                                                                                                             TaskContinuationOptions
+                                                                                                                 .
+                                                                                                                 AttachedToParent);
+                        break;
+
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") +
+                                        (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search,
+                                              MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?) null,
+                                              MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?) null,
+                                              Dependencies, Installed, Active, Required, Blocked, Latest, Location,
+                                              ForceScan, messages)
+                                .ContinueWith((FP) =>
+                                                    {
+                                                        String P;
+                                                        IEnumerable<Package> PL = FP.Result;
+                                                        int i = 0;
+                                                        if (PL.Count() > 1)
+                                                        {
+                                                            Collection<ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                                            foreach (Package p in PL)
+                                                            {
+                                                                string desc = "";
+                                                                desc += Selections[i++];
+                                                                desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                                Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                                            }
+                                                            int choice =
+                                                                Host.UI.PromptForChoice(
+                                                                    "Multiple possible matches.",
+                                                                    "Please choose one of the following:",
+                                                                    Choices, 0);
+                                                            P = Choices[choice].HelpMessage;
+                                                            // do menu stuff here
+                                                        }
+                                                        else
+                                                        {
+                                                            P = PL.FirstOrDefault().CanonicalName;
+                                                        }
+                                                        PM.GetPackageDetails(P, DetailMessages)
+                                                            .ContinueWith((FDP) =>
+                                                                            {
+                                                                                if (Details != null)
+                                                                                    output.Add(Details);
+                                                                            },
+                                                                        TaskContinuationOptions.AttachedToParent);
+                                                    });
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
     }
 
@@ -527,179 +702,148 @@ namespace CoApp.PSClient
         // As this is a command to install something, I am disallowing the "Installed" switch.
         private bool? Installed = null;
 
-        /** original code
         protected override void ProcessRecord()
         {
-            int ID_Counter = 1;
-            Package InitialPackage;
-            List<string> DoneInstalling = new List<string>();
-            Dictionary<String, Tuple<int, int>> Children = new Dictionary<string, Tuple<int, int>>();
-            PackageManagerMessages InstallMessages = new PackageManagerMessages()
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                InstallingPackageProgress = (N, P) =>
+                Command com = new Command("Install-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                if (AutoUpgrade != null) com.Parameters.Add("AutoUpgrade", AutoUpgrade);
+                if (ForceInstall) com.Parameters.Add("ForceInstall");
+                if (ForceDownload) com.Parameters.Add("ForceDownload");
+                if (Pretend) com.Parameters.Add("Pretend");
+                task = new Task(() =>
                 {
-                    if (Children.ContainsKey(N))
-                        Children[N] = new Tuple<int, int>(Children[N].Item1, P);
-                    else
-                        Children[N] = new Tuple<int, int>(ID_Counter++, P);
-                },
-                InstalledPackage = (N) =>
-                {
-                    Children.Remove(N);
-                    DoneInstalling.Add(N);
-                }
-            }.Extend(messages);
-
-            switch (ParameterSetName)
-            {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    PM.InstallPackage(InputPackage.CanonicalName, AutoUpgrade, ForceInstall, ForceDownload, Pretend, messages).ContinueWith((FP) =>
+                    foreach (Runspace R in Remotes)
                     {
-                        bool done = false;
-                        while (!done)
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
+            }
+            //Non-Remoting
+            else
+            {
+                int ID_Counter = 1;
+                bool Running = true;
+                AutoResetEvent Inbound = new AutoResetEvent(false);
+                Dictionary<int, ProgressRecord> Recs = new Dictionary<int, ProgressRecord>();
+                Dictionary<String, int> Children = new Dictionary<string, int>();
+                PackageManagerMessages InstallMessages = new PackageManagerMessages()
+                {
+                    InstallingPackageProgress = (N, P, T) =>
+                    {
+                        if (!Children.ContainsKey(N))
+                            Children[N] = ID_Counter++;
+                        ProgressRecord current = new ProgressRecord(Children[N], N, "Installing...");
+                        current.PercentComplete = P;
+                        current.CurrentOperation = "Installing package...";
+                        current.SecondsRemaining = -1;
+                        Recs[Children[N]] = current;
+                        Inbound.Set();
+                    },
+                    InstalledPackage = (N) =>
+                    {
+                        ProgressRecord current = new ProgressRecord(Children[N], N, "Installing...");
+                        current.PercentComplete = 100;
+                        current.CurrentOperation = "Installing package...";
+                        current.SecondsRemaining = -1;
+                        Recs[Children[N]] = current;
+                        Inbound.Set(); 
+                        Children.Remove(N);
+                    },
+                    FailedPackageInstall = (name,file,reason) => Host.UI.WriteLine("Installation failed for package: "+name+", from file "+file+", for reason: "+reason)
+                }.Extend(messages);
+
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.InstallPackage(CanonicalName, AutoUpgrade, ForceInstall, ForceDownload, Pretend, InstallMessages).ContinueWith(antecedent =>
+                                                                                                                                                     {
+                                                                                                                                                         Running = false;
+                                                                                                                                                         Inbound.Set();
+                                                                                                                                                     }, TaskContinuationOptions.AttachedToParent);
+                        break;
+
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.InstallPackage(P, AutoUpgrade, ForceInstall, ForceDownload, Pretend, InstallMessages);
+                                       }, TaskContinuationOptions.AttachedToParent).ContinueWith(antecedent =>
+                                                                                                     { 
+                                                                                                         Running = false;
+                                                                                                         Inbound.Set();
+                                                                                                     });
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+
+                do
+                {
+                    Inbound.WaitOne();
+                    if (Recs.Any())
+                        foreach (KeyValuePair<int, ProgressRecord> PR in Recs)
                         {
-                            foreach (string s in DoneInstalling)
-                            {
-                                WriteVerbose("Package installed: " + s);
-                                DoneInstalling.Remove(s);
-                            }
-                            foreach (KeyValuePair<string, Tuple<int, int>> child in Children)
-                            {
-                                WriteProgress(new ProgressRecord(child.Value.Item1, child.Key, "" + child.Value.Item2 + "% Complete"));
-                            }
-                            if (Children.Count < 1 && DoneInstalling.Count < 1)
-                                done = true;
+                            WriteProgress(PR.Value);
+                            if (PR.Value.PercentComplete >= 100)
+                                Recs.Remove(PR.Key);
                         }
-                    });
-                    break;
-
-                case "Typed":
-                    PM.GetPackages(new List<string> { Name, Version, Arch, PublicKeyToken },
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.InstallPackage(P, AutoUpgrade, ForceInstall, ForceDownload, Pretend, messages).ContinueWith((FIP) =>
-                                       {
-                                           bool done = false;
-                                           while (!done)
-                                           {
-                                               foreach (string s in DoneInstalling)
-                                               {
-                                                   WriteVerbose("Package installed: " + s);
-                                                   DoneInstalling.Remove(s);
-                                               }
-                                               foreach (KeyValuePair<string, Tuple<int, int>> child in Children)
-                                               {
-                                                   WriteProgress(new ProgressRecord(child.Value.Item1, child.Key, "" + child.Value.Item2 + "% Complete"));
-                                               }
-                                               if (Children.Count < 1 && DoneInstalling.Count < 1)
-                                                   done = true;
-                                           }
-                                       });
-                                   });
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
-            }
-
+                } while (Running);
         }
-         */
-
-        protected override void ProcessRecord()
-        {
-            int ID_Counter = 1;
-            Dictionary<String, int> Children = new Dictionary<string, int>();
-            PackageManagerMessages InstallMessages = new PackageManagerMessages()
-            {
-                InstallingPackageProgress = (N, P) =>
-                {
-                    if (!Children.ContainsKey(N))
-                        Children[N] = ID_Counter++;
-                    ProgressRecord current = new ProgressRecord(Children[N], N, "Installing...") {PercentComplete = P};
-                    WriteProgress(current);
-                },
-                InstalledPackage = (N) =>
-                {
-                    ProgressRecord current = new ProgressRecord(Children[N], N, "Installing...") {PercentComplete = 100};
-                    WriteProgress(current);
-                    Children.Remove(N);
-                },
-                FailedPackageInstall = (name,file,reason) => Host.UI.WriteLine("Installation failed for package: "+name+", from file "+file+", for reason: "+reason)
-            }.Extend(messages);
-
-            switch (ParameterSetName)
-            {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.InstallPackage(CanonicalName, AutoUpgrade, ForceInstall, ForceDownload, Pretend, InstallMessages);
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.InstallPackage(P, AutoUpgrade, ForceInstall, ForceDownload, Pretend, InstallMessages);
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
-            }
-
         }
 
     }
@@ -755,58 +899,97 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            PackageManagerMessages RemovalMessages = new PackageManagerMessages()
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                FailedPackageRemoval = (N, R) => Host.UI.WriteLine("Failed to remove package:  " + N + ",  Reason: " + R)
-            }.Extend(messages);
-            switch (ParameterSetName)
-            {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.RemovePackage(CanonicalName, ForceRemove, RemovalMessages).ContinueWith((x) => Host.UI.WriteLine("Package removed: " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.RemovePackage(P, ForceRemove, RemovalMessages).ContinueWith((x) => Host.UI.WriteLine("Package removed: " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Remove-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                if (ForceRemove) com.Parameters.Add("ForceRemove");
+                if (Pretend) com.Parameters.Add("Pretend");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                PackageManagerMessages RemovalMessages = new PackageManagerMessages()
+                {
+                    FailedPackageRemoval = (N, R) => Host.UI.WriteLine("Failed to remove package:  " + N + ",  Reason: " + R)
+                }.Extend(messages);
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.RemovePackage(CanonicalName, ForceRemove, RemovalMessages).ContinueWith((x) => Host.UI.WriteLine("Package removed: " + CanonicalName));
+                        break;
 
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.RemovePackage(P, ForceRemove, RemovalMessages).ContinueWith((x) => Host.UI.WriteLine("Package removed: " + P));
+                                       }, TaskContinuationOptions.AttachedToParent);
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
 
     }
@@ -852,8 +1035,6 @@ namespace CoApp.PSClient
         public SwitchParameter ForceScan;
 
         [Parameter(Mandatory = false)]
-        public SwitchParameter ForceRemove;
-        [Parameter(Mandatory = false)]
         public SwitchParameter Pretend;
 
 
@@ -862,55 +1043,47 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            Host.UI.WriteLine("Update-Package not yet implimented.");
-            /*
-            PackageManagerMessages RemovalMessages = new PackageManagerMessages()
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                FailedPackageRemoval = (N, R) => Host.UI.WriteLine("Failed to remove package:  " + N + ",  Reason: " + R)
-            }.Extend(messages);
-            switch (ParameterSetName)
-            {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.UpdatePackage(CanonicalName, ForceRemove, RemovalMessages).ContinueWith((x) => Host.UI.WriteLine("Package removed: " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    task = PM.GetPackages(new List<string> { Name, Version, Arch, PublicKeyToken },
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               Choices.Add(new ChoiceDescription(p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.RemovePackage(P, ForceRemove, RemovalMessages).ContinueWith((x) => Host.UI.WriteLine("Package removed: " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Update-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                if (Pretend) com.Parameters.Add("Pretend");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
-            */
+            //Non-Remoting
+            else
+            {
+                Host.UI.WriteLine("Update-Package not yet implimented.");
+            }
+
         }
 
     }
@@ -921,15 +1094,35 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            task = PM.GetPackages("*", null, null, null, true, null, false, false, null, null, null, messages).ContinueWith((Packs) =>
-                                  {
-                                      foreach (Package P in Packs.Result)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
+            {
+                Command com = new Command("Trim-Packages");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
+            }
+            //Non-Remoting
+            else
+            {
+                task = PM.GetPackages("*", null, null, null, true, null, false, false, null, null, null, messages).ContinueWith((Packs) =>
                                       {
-                                          PM.RemovePackage(P.CanonicalName, null, messages).ContinueWith((A)=> { }, TaskContinuationOptions.AttachedToParent);
-                                      }
-                                  }, TaskContinuationOptions.AttachedToParent);
+                                          foreach (Package P in Packs.Result)
+                                          {
+                                              PM.RemovePackage(P.CanonicalName, null, messages).ContinueWith((A) => { }, TaskContinuationOptions.AttachedToParent);
+                                          }
+                                      }, TaskContinuationOptions.AttachedToParent);
+            }
         }
-
     }
 
     [Cmdlet("Activate", "Package", DefaultParameterSetName = "Typed")]
@@ -973,58 +1166,95 @@ namespace CoApp.PSClient
         public SwitchParameter ForceScan;
 
         // We can only set a package as "Active" if it's already installed.
-        private bool? Installed = true;
+        private readonly bool? Installed = true;
 
         protected override void ProcessRecord()
         {
-            switch (ParameterSetName)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.SetPackage(CanonicalName, true, null, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Active': " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.SetPackage(P, true, null, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Active': " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Activate-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.SetPackage(CanonicalName, true, null, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Active': " + CanonicalName));
+                        break;
 
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.SetPackage(P, true, null, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Active': " + P));
+                                       }, TaskContinuationOptions.AttachedToParent);
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
 
     }
@@ -1073,54 +1303,92 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            switch (ParameterSetName)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.SetPackage(CanonicalName, null, null, true, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Blocked': " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.SetPackage(P, null, null, true, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Blocked': " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Block-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Installed != null) com.Parameters.Add("Installed", Installed);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.SetPackage(CanonicalName, null, null, true, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Blocked': " + CanonicalName));
+                        break;
 
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.SetPackage(P, null, null, true, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Blocked': " + P));
+                                       }, TaskContinuationOptions.AttachedToParent);
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
 
     }
@@ -1169,54 +1437,92 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            switch (ParameterSetName)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.SetPackage(CanonicalName, null, null, false, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Unblocked': " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.SetPackage(P, null, null, false, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Unblocked': " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Unblock-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Installed != null) com.Parameters.Add("Installed", Installed);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.SetPackage(CanonicalName, null, null, false, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Unblocked': " + CanonicalName));
+                        break;
 
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.SetPackage(P, null, null, false, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Unblocked': " + P));
+                                       }, TaskContinuationOptions.AttachedToParent);
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
 
     }
@@ -1265,54 +1571,92 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            switch (ParameterSetName)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.SetPackage(CanonicalName, null, true, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Required': " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.SetPackage(P, null, true, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Required': " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Mark-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Installed != null) com.Parameters.Add("Installed", Installed);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.SetPackage(CanonicalName, null, true, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Required': " + CanonicalName));
+                        break;
 
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.SetPackage(P, null, true, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Required': " + P));
+                                       }, TaskContinuationOptions.AttachedToParent);
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
 
     }
@@ -1361,54 +1705,92 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            switch (ParameterSetName)
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                case "Package":
-                    CanonicalName = InputPackage.CanonicalName;
-                    goto case "Canonical";
-                case "Canonical":
-                    task = PM.SetPackage(CanonicalName, null, false, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Not Required': " + CanonicalName));
-                    break;
-
-                case "Typed":
-                    string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
-                    task = PM.GetPackages(search,
-                                   MinVersion.VersionStringToUInt64(), MaxVersion.VersionStringToUInt64(), Dependencies,
-                                   Installed, Active, Required, Blocked, Latest, Location, ForceScan,
-                                   messages).ContinueWith((FP) =>
-                                   {
-                                       String P;
-                                       IEnumerable<Package> PL = FP.Result;
-                                       int i = 0;
-                                       if (PL.Count() > 1)
-                                       {
-                                           Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
-                                           foreach (Package p in PL)
-                                           {
-                                               string desc = "";
-                                               desc += Selections[i++];
-                                               desc += p.Name + "-" + p.Version + "-" + p.Architecture;
-                                               Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
-                                           }
-                                           int choice = Host.UI.PromptForChoice("Multiple possible matches.",
-                                                                   "Please choose one of the following:", Choices, 0);
-                                           P = Choices[choice].Label;
-                                           // do menu stuff here
-                                       }
-                                       else
-                                       {
-                                           P = PL.FirstOrDefault().CanonicalName;
-                                       }
-                                       PM.SetPackage(P, null, false, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Not Required': " + P));
-                                   }, TaskContinuationOptions.AttachedToParent);
-
-                    break;
-                default:
-                    Host.UI.WriteLine("Invalid input parameters.");
-                    break;
-
+                Command com = new Command("Unmark-Package");
+                if (InputPackage != null) com.Parameters.Add("InputPackage", InputPackage);
+                if (CanonicalName != null) com.Parameters.Add("CanonicalName", CanonicalName);
+                if (Name != null) com.Parameters.Add("Name", Name);
+                if (Version != null) com.Parameters.Add("Version", Version);
+                if (Arch != null) com.Parameters.Add("Arch", Arch);
+                if (PublicKeyToken != null) com.Parameters.Add("PublicKeyToken", PublicKeyToken);
+                if (MinVersion != null) com.Parameters.Add("MinVersion", MinVersion);
+                if (MaxVersion != null) com.Parameters.Add("MaxVersion", MaxVersion);
+                if (Dependencies != null) com.Parameters.Add("Dependencies", Dependencies);
+                if (Installed != null) com.Parameters.Add("Installed", Installed);
+                if (Active != null) com.Parameters.Add("Active", Active);
+                if (Required != null) com.Parameters.Add("Required", Required);
+                if (Blocked != null) com.Parameters.Add("Blocked", Blocked);
+                if (Latest != null) com.Parameters.Add("Latest", Latest);
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (ForceScan) com.Parameters.Add("ForceScan");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
             }
+            //Non-Remoting
+            else
+            {
+                switch (ParameterSetName)
+                {
+                    case "Package":
+                        CanonicalName = InputPackage.CanonicalName;
+                        goto case "Canonical";
+                    case "Canonical":
+                        task = PM.SetPackage(CanonicalName, null, false, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Not Required': " + CanonicalName));
+                        break;
 
+                    case "Typed":
+                        string search = Name + (Version != null ? "-" + Version : "") + (Arch != null ? "-" + Arch : "") + (PublicKeyToken != null ? "-" + PublicKeyToken : "");
+                        task = PM.GetPackages(search, MinVersion != null ? MinVersion.VersionStringToUInt64() : (ulong?)null,
+                                       MaxVersion != null ? MaxVersion.VersionStringToUInt64() : (ulong?)null,
+                                       Dependencies, Installed, Active, Required, Blocked, Latest, Location, ForceScan,
+                                       messages).ContinueWith((FP) =>
+                                       {
+                                           String P;
+                                           IEnumerable<Package> PL = FP.Result;
+                                           int i = 0;
+                                           if (PL.Count() > 1)
+                                           {
+                                               Collection<System.Management.Automation.Host.ChoiceDescription> Choices = new Collection<ChoiceDescription>();
+                                               foreach (Package p in PL)
+                                               {
+                                                   string desc = "";
+                                                   desc += Selections[i++];
+                                                   desc += p.Name + "-" + p.Version + "-" + p.Architecture;
+                                                   Choices.Add(new ChoiceDescription(desc, p.CanonicalName));
+                                               }
+                                               int choice = Host.UI.PromptForChoice("Multiple possible matches.",
+                                                                       "Please choose one of the following:", Choices, 0);
+                                               P = Choices[choice].HelpMessage;
+                                               // do menu stuff here
+                                           }
+                                           else
+                                           {
+                                               P = PL.FirstOrDefault().CanonicalName;
+                                           }
+                                           PM.SetPackage(P, null, false, null, messages).ContinueWith((x) => Host.UI.WriteLine("Package set to 'Not Required': " + P));
+                                       }, TaskContinuationOptions.AttachedToParent);
+
+                        break;
+                    default:
+                        Host.UI.WriteLine("Invalid input parameters.");
+                        break;
+
+                }
+            }
         }
 
     }
@@ -1424,13 +1806,34 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            PackageManagerMessages FeedMessages = new PackageManagerMessages()
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                FeedAdded = (S) => Host.UI.WriteLine("Feed Added:  " + S)
-            }.Extend(messages);
-            task = PM.AddFeed(Location, SessionOnly, FeedMessages);
+                Command com = new Command("Add-Feed");
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (SessionOnly) com.Parameters.Add("SessionOnly");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() => Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
+            }
+            //Non-Remoting
+            else
+            {
+                PackageManagerMessages FeedMessages = new PackageManagerMessages()
+                {
+                    FeedAdded = (S) => Host.UI.WriteLine("Feed Added:  " + S)
+                }.Extend(messages);
+                task = PM.AddFeed(Location, SessionOnly, FeedMessages);
+            }
         }
-
     }
 
     [Cmdlet(VerbsCommon.Remove, "Feed")]
@@ -1444,13 +1847,35 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            PackageManagerMessages FeedMessages = new PackageManagerMessages()
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                FeedRemoved = (S) => Host.UI.WriteLine("Feed Removed:  " + S)
-            }.Extend(messages);
-            task = PM.RemoveFeed(Location, SessionOnly, FeedMessages);
+                Command com = new Command("Remove-Feed");
+                if (Location != null) com.Parameters.Add("Location", Location);
+                if (SessionOnly) com.Parameters.Add("SessionOnly");
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
+            }
+            //Non-Remoting
+            else
+            {
+                PackageManagerMessages FeedMessages = new PackageManagerMessages()
+                {
+                    FeedRemoved = (S) => Host.UI.WriteLine("Feed Removed:  " + S)
+                }.Extend(messages);
+                task = PM.RemoveFeed(Location, SessionOnly, FeedMessages);
+            }
         }
-
     }
 
     [Cmdlet("List", "Feed")]
@@ -1464,22 +1889,45 @@ namespace CoApp.PSClient
 
         protected override void ProcessRecord()
         {
-            PackageManagerMessages FeedMessages = new PackageManagerMessages()
+            // Handle remoting
+            if (!ComputerName.IsNullOrEmpty())
             {
-                
-                FeedDetails = (Loc, Scanned, isSession, supressed, verified) => output.Add(new Feed()
-                                                                                               {
-                                                                                                   Location = Loc,
-                                                                                                   LastScanned = Scanned,
-                                                                                                   Session = isSession,
-                                                                                                   Supressed = supressed,
-                                                                                                   Verified = verified
-                                                                                               })
-            }.Extend(messages);
-            task = PM.ListFeeds(Index, MaxResults, FeedMessages);
-            
-        }
+                Command com = new Command("List-Feed");
+                if (Index != null) com.Parameters.Add("Index", Index);
+                if (MaxResults != null) com.Parameters.Add("MaxResults", MaxResults);
+                task = new Task(() =>
+                {
+                    foreach (Runspace R in Remotes)
+                    {
+                        Task<Collection<PSObject>> T = new Task<Collection<PSObject>>(() =>
+                            Remote.Exec(R, com));
+                        T.ContinueWith(antecedent =>
+                                output.AddRange(antecedent.Result), TaskContinuationOptions.AttachedToParent);
+                        T.Start();
+                    }
+                });
+                task.Start();
+            }
+            //Non-Remoting
+            else
+            {
+                PackageManagerMessages FeedMessages = new PackageManagerMessages()
+                {
 
+                    FeedDetails = (Loc, Scanned, isSession, supressed, verified) => output
+                        .Add(new Feed()
+                                {
+                                    Location = Loc,
+                                    LastScanned = Scanned,
+                                    Session = isSession,
+                                    Supressed = supressed,
+                                    Verified = verified
+                                })
+                }.Extend(messages);
+                task = PM.ListFeeds(Index, MaxResults, FeedMessages);
+
+            }
+        }
     }
 
 
@@ -1503,3 +1951,4 @@ namespace CoApp.PSClient
 
         */
 }
+
