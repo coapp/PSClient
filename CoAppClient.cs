@@ -1081,6 +1081,10 @@ namespace CoApp.PSClient
             //Non-Remoting
             else
             {
+                //GetPackages(parameters, _minVersion, _maxVersion, _dependencies, true, _active, _required, false, _latest ,_location,_forceScan,  messages: _messages).
+                //ContinueWith(antecedent => Upgrade(antecedent.Result));
+
+
                 Host.UI.WriteLine("Update-Package not yet implimented.");
             }
 

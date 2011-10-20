@@ -32,6 +32,16 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="CoApp.Toolkit, Version=1.1.2.1108, Culture=neutral, PublicKeyToken=0da32de74420310f, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\output\any\release\bin\CoApp.Toolkit.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="CoApp.Toolkit.Engine.Client, Version=1.1.2.1108, Culture=neutral, PublicKeyToken=0da32de74420310f, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\output\any\release\bin\CoApp.Toolkit.Engine.Client.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Microsoft.PowerShell.ConsoleHost, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\Program Files (x86)\Reference Assemblies\Microsoft\WindowsPowerShell\v1.0\Microsoft.PowerShell.ConsoleHost.dll</HintPath>
@@ -54,16 +64,6 @@
     <Compile Include="Remoting.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\toolkit\CoApp.Toolkit.csproj">
-      <Project>{8B7E0D2F-6CA0-4E5E-BF52-1E4BDB132BBC}</Project>
-      <Name>CoApp.Toolkit %28coapp.toolkit\CoApp.Toolkit%29</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\toolkit\CoApp.Toolkit.Engine.Client.csproj">
-      <Project>{CC917E10-0068-4E91-8D3D-3276846F7E43}</Project>
-      <Name>CoApp.Toolkit.Engine.Client</Name>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <EmbeddedResource Include="CoApp.format.ps1xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <SubType>Designer</SubType>
@@ -73,6 +73,17 @@
     <None Include="CoApp.psd1">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="PSClient.autopkg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="template.autopkg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="logo3.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

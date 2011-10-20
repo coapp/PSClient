@@ -1,0 +1,61 @@
+// autopackage file for PSClient
+
+package {
+    name: "PSClient";
+    display-name: "CoApp PowerShell Client";
+    
+    version: 0.8.0.1; // or auto; if not here, auto is assumed
+    // arch: any; //any, x86, x64 or auto; if not here auto is assumed
+    
+    location: "http://coapp.org/repository/${OutputFilename}";
+}
+
+provides {
+    feature: "coapp.PowerShell" = "0.8";
+}
+
+
+metadata {
+    summary: "PowerShell client cmdlets for using and manageing CoApp.";
+    description: "These PowerShell cmdlets provide easy access to the full functionality of CoApp.  In addition, they provide a convenient means to manage CoApp on remote computers."; // or path to a file...
+    icon: "logo3.png";
+    
+    author-version : "1.0 RC1";
+    bug-tracker: "https://github.com/organizations/coapp/dashboard/issues";
+    stability : "-20";
+    tags : {
+        PowerShell, CoApp
+    };
+
+}
+
+compatability-policy {
+    minimum: "0.7.0.0";
+    maximum: "${OneLessThanCurrent}"; // this is the default
+    versions : {
+        "0.7",
+		"0.8"
+    }; // if not specified, find the versions by looking at the feeds and finding all the major/minor versions in range.
+}
+
+files[module] {
+    include: {
+        "CoApp.dll",
+		"CoApp.format.ps1xml",
+		"CoApp.psd1"
+    };
+    
+    trim-path: minimal;
+};
+
+application {
+    include : {
+    module
+    };
+}
+
+package-composition {
+    symlinks : { 
+        module => @"${powershell}\${Model.Name}\${each.name}" = @"${packagedir}\${each.name}";
+    };
+}
