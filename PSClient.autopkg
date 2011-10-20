@@ -4,7 +4,7 @@ package {
     name: "PSClient";
     display-name: "CoApp PowerShell Client";
     
-    version: 0.8.0.1; // or auto; if not here, auto is assumed
+    // version: 0.8.0.1; // or auto; if not here, auto is assumed
     // arch: any; //any, x86, x64 or auto; if not here auto is assumed
     
     location: "http://coapp.org/repository/${OutputFilename}";
