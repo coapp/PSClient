@@ -10,6 +10,10 @@ package {
     location: "http://coapp.org/repository/${OutputFilename}";
 }
 
+//requires {
+//    package: "coapp.toolkit-1.*";
+//}
+
 provides {
     feature: "coapp.PowerShell" = "0.8";
 }
@@ -42,7 +46,8 @@ files[module] {
     include: {
         "CoApp.dll",
 		"CoApp.format.ps1xml",
-		"CoApp.psd1"
+		"CoApp.psd1",
+		"powershell.exe.config"
     };
     
     trim-path: minimal;
@@ -56,6 +61,6 @@ application {
 
 package-composition {
     symlinks : { 
-        module => @"${powershell}\${Model.Name}\${each.name}" = @"${packagedir}\${each.name}";
+        module => @"${powershell}\${Package.Name}\${each.name}" = @"${packagedir}\${each.name}";
     };
 }
