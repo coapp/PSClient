@@ -161,7 +161,7 @@ namespace CoApp.PSClient
             else
             {
                 PM = PackageManager.Instance;
-                PM.Connect("PSClient", SessionID);
+                PM.ConnectAndWait("PSClient", SessionID, Timeout ?? 5000);
                 messages = new PackageManagerMessages
                                {
                                    UnexpectedFailure = UnexpectedFailure,
@@ -282,16 +282,16 @@ namespace CoApp.PSClient
                 int i = 0;
                 bool running = true;
                 WebClient WC = new WebClient();
-                WC.DownloadFileCompleted += new AsyncCompletedEventHandler((O, Args) =>
-                {
-                    if (File.Exists(Path.Combine(arg3, canonicalName)))
-                        PM.RecognizeFile(canonicalName, Path.Combine(arg3, canonicalName), remote, messages);
-                    else
-                    {
-                        // didn't really grab the file, move on to next source
-                        running = true;
-                    }
-                });
+                WC.DownloadFileCompleted += (O, Args) =>
+                                                {
+                                                    if (File.Exists(Path.Combine(arg3, canonicalName)))
+                                                        PM.RecognizeFile(canonicalName, Path.Combine(arg3, canonicalName), remote, messages);
+                                                    else
+                                                    {
+                                                        // didn't really grab the file, move on to next source
+                                                        running = true;
+                                                    }
+                                                };
                 IEnumerator<string> R = arg2.GetEnumerator();
                 while (!(File.Exists(Path.Combine(arg3, canonicalName))) && i++ < arg2.Count() && running)
                 {
@@ -329,9 +329,18 @@ namespace CoApp.PSClient
                 }
             // wait for cancellation token, or service to disconnect
             if (ComputerName.IsNullOrEmpty())
-                WaitHandle.WaitAny(new[] {PM.IsDisconnected, PM.IsCompleted});
-            
-            
+            {
+                var trigger = new ManualResetEvent(!PM.IsConnected || PM.ActiveCalls == 0);
+                Action whenTriggered = () => trigger.Set();
+
+                PM.Disconnected += whenTriggered;
+                PM.Completed += whenTriggered;
+                WaitHandle.WaitAny(new[] {trigger});
+
+                PM.Disconnected -= whenTriggered;
+                PM.Completed -= whenTriggered;
+
+            }
 
 
             foreach (var item in output)
